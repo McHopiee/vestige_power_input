@@ -18,7 +18,11 @@ jobs:
           distribution: 'microsoft'
       - run: chmod +x ./gradlew
       - run: ./gradlew build
+      - name: Merge into one jar
+        run: |
+          mkdir -p build/combined
+          python3 merge_jar.py base/svm-powers-rp.jar build/libs/rpkeys-1.0.0.jar build/combined/svm-powers-combined.jar
       - uses: actions/upload-artifact@v4
         with:
-          name: Artifacts
-          path: rpkeys-mod-project/build/libs/*.jar
+          name: svm-powers-combined
+          path: rpkeys-mod-project/build/combined/*.jar
