@@ -3,21 +3,32 @@ package rp.keybinds;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /**
- * A ring of buttons, one per spell, around a centre button. Locked spells are blank and disabled.
- * Click a spell to cast it. Esc closes. More than 8 spells are split over pages (centre button turns the page).
+ * Radial spell wheel: a ring of pie slices, one per spell, around a centre disc.
+ * Locked spells are blank. Hover highlights a slice, left click casts it. Esc closes.
+ * More than 8 spells are split over pages; click the centre disc to turn the page.
  */
 public class WheelScreen extends Screen {
     record Entry(int id, String name, boolean unlocked) {}
 
     private static final int PER_PAGE = 8;
+    private static final int CENTER = -2;
+    private static final int NONE = -1;
+
     private final String power;
     private final List<Entry> entries;
     private int page = 0;
+    private int pages = 1;
+
+    private int cx, cy, rOuter, rInner, rCenter;
+    private int n, start;
+    private final List<List<int[]>> runs = new ArrayList<>();
+    private final List<int[]> centerRuns = new ArrayList<>();
 
     public WheelScreen(String power, List<Entry> entries) {
         super(Component.literal(power));
@@ -44,40 +55,132 @@ public class WheelScreen extends Screen {
 
     @Override
     protected void init() {
-        int cx = this.width / 2;
-        int cy = this.height / 2;
-        int pages = Math.max(1, (entries.size() + PER_PAGE - 1) / PER_PAGE);
+        cx = this.width / 2;
+        cy = this.height / 2;
+        rOuter = Math.max(60, Math.min(112, Math.min(this.width, this.height) / 2 - 10));
+        rInner = (int) (rOuter * 0.55);
+        rCenter = rInner - 4;
+
+        pages = Math.max(1, (entries.size() + PER_PAGE - 1) / PER_PAGE);
         if (page >= pages) page = 0;
-        int start = page * PER_PAGE;
-        int count = Math.min(PER_PAGE, entries.size() - start);
+        start = page * PER_PAGE;
+        n = Math.max(1, Math.min(PER_PAGE, entries.size() - start));
+        if (entries.isEmpty()) n = 1;
 
-        int bw = 104, bh = 20;
-        int rx = Math.min(130, Math.max(70, this.width / 2 - bw / 2 - 10));
-        int ry = Math.min(80, Math.max(40, this.height / 2 - bh - 10));
+        // Pre-compute horizontal pixel runs for every slice so drawing is just a few fills per row.
+        runs.clear();
+        centerRuns.clear();
+        for (int i = 0; i < n; i++) runs.add(new ArrayList<>());
+        for (int y = -rOuter; y <= rOuter; y++) {
+            int runStart = 0;
+            int runClass = -3; // "no run yet"
+            for (int x = -rOuter; x <= rOuter + 1; x++) {
+                int c = (x > rOuter) ? NONE : classify(x, y);
+                if (c != runClass) {
+                    if (runClass >= 0 || runClass == CENTER) addRun(runClass, y, runStart, x);
+                    runStart = x;
+                    runClass = c;
+                }
+            }
+        }
+    }
 
-        for (int i = 0; i < count; i++) {
-            Entry e = entries.get(start + i);
-            double ang = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(1, count);
-            int x = cx + (int) Math.round(Math.cos(ang) * rx) - bw / 2;
-            int y = cy + (int) Math.round(Math.sin(ang) * ry) - bh / 2;
-            Component label = e.unlocked() ? Component.literal(e.name()) : Component.literal(" ");
-            Button b = Button.builder(label, btn -> {
-                RpKeybindsClient.sendTrigger(Minecraft.getInstance(), e.id());
-                this.onClose();
-            }).bounds(x, y, bw, bh).build();
-            b.active = e.unlocked();
-            this.addRenderableWidget(b);
+    private void addRun(int cls, int y, int x0, int x1) {
+        int[] run = {y, x0, x1};
+        if (cls == CENTER) centerRuns.add(run);
+        else if (cls >= 0 && cls < runs.size()) runs.get(cls).add(run);
+    }
+
+    /** Which part of the wheel a pixel offset from the centre belongs to. */
+    private int classify(int dx, int dy) {
+        double px = dx + 0.5, py = dy + 0.5;
+        double r = Math.sqrt(px * px + py * py);
+        if (r <= rCenter) return CENTER;
+        if (r < rInner || r > rOuter) return NONE;
+        double sec = 2 * Math.PI / n;
+        double rel = Math.atan2(py, px) + Math.PI / 2 + sec / 2;
+        rel = ((rel % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        int idx = Math.min(n - 1, (int) (rel / sec));
+        double within = rel - idx * sec;
+        if (Math.min(within, sec - within) * r < 1.5) return NONE; // gap between slices
+        return idx;
+    }
+
+    @Override
+    public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(g, mouseX, mouseY, delta);
+        int hover = classify(mouseX - cx, mouseY - cy);
+
+        for (int i = 0; i < n; i++) {
+            Entry e = slot(i);
+            int color;
+            if (e == null || !e.unlocked()) color = 0xA0161616;
+            else if (hover == i) color = 0xFF1E78FF;
+            else color = 0xD02A2A2A;
+            for (int[] r : runs.get(i)) g.fill(cx + r[1], cy + r[0], cx + r[2], cy + r[0] + 1, color);
+        }
+        int centerColor = (hover == CENTER && pages > 1) ? 0xFF1E78FF : 0xD0161616;
+        for (int[] r : centerRuns) g.fill(cx + r[1], cy + r[0], cx + r[2], cy + r[0] + 1, centerColor);
+
+        // Slice labels: only unlocked spells show their name.
+        double sec = 2 * Math.PI / n;
+        double rm = (rInner + rOuter) / 2.0;
+        for (int i = 0; i < n; i++) {
+            Entry e = slot(i);
+            if (e == null || !e.unlocked()) continue;
+            double a = -Math.PI / 2 + i * sec;
+            drawCentered(g, e.name(), cx + (int) Math.round(Math.cos(a) * rm), cy + (int) Math.round(Math.sin(a) * rm));
         }
 
-        Component centre = pages > 1
-            ? Component.literal(power + "  " + (page + 1) + "/" + pages)
-            : Component.literal(power);
-        Button mid = Button.builder(centre, btn -> {
-            page = (page + 1) % pages;
-            this.rebuildWidgets();
-        }).bounds(cx - 50, cy - 10, 100, 20).build();
-        mid.active = pages > 1;
-        this.addRenderableWidget(mid);
+        // Centre disc: power name (and page number when there are several pages).
+        drawCentered(g, power, cx, pages > 1 ? cy - 6 : cy);
+        if (pages > 1) drawCentered(g, (page + 1) + " / " + pages, cx, cy + 8);
+    }
+
+    private Entry slot(int i) {
+        int k = start + i;
+        return (k >= 0 && k < entries.size()) ? entries.get(k) : null;
+    }
+
+    /** Draws text centred on (x, y), wrapping long names onto two lines. */
+    private void drawCentered(GuiGraphicsExtractor g, String text, int x, int y) {
+        String[] lines = wrap(text);
+        int lh = this.font.lineHeight;
+        int top = y - (lines.length * lh) / 2;
+        for (int i = 0; i < lines.length; i++) {
+            int w = this.font.width(lines[i]);
+            g.text(this.font, lines[i], x - w / 2, top + i * lh, 0xFFFFFFFF, true);
+        }
+    }
+
+    private String[] wrap(String text) {
+        if (this.font.width(text) <= 62 || text.indexOf(' ') < 0) return new String[] {text};
+        int mid = text.length() / 2, best = -1;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == ' ' && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+        }
+        return new String[] {text.substring(0, best), text.substring(best + 1)};
+    }
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (event.button() == 0) {
+            int h = classify((int) Math.floor(event.x()) - cx, (int) Math.floor(event.y()) - cy);
+            if (h >= 0 && h < n) {
+                Entry e = slot(h);
+                if (e != null && e.unlocked()) {
+                    RpKeybindsClient.sendTrigger(Minecraft.getInstance(), e.id());
+                    this.onClose();
+                }
+                return true;
+            }
+            if (h == CENTER && pages > 1) {
+                page = (page + 1) % pages;
+                this.rebuildWidgets();
+                return true;
+            }
+        }
+        return super.mouseClicked(event, doubleClick);
     }
 
     @Override
