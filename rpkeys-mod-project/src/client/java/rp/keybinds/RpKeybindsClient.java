@@ -6,7 +6,9 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.KeyMapping;
+import java.lang.reflect.Method;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.Identifier;
 
 /**
@@ -46,12 +48,39 @@ public class RpKeybindsClient implements ClientModInitializer {
             if (!s.startsWith(PREFIX)) return true;
             Minecraft mc = Minecraft.getInstance();
             String body = s.substring(PREFIX.length());
-            mc.execute(() -> mc.setScreen(WheelScreen.fromPayload(body)));
+            mc.execute(() -> openScreen(mc, WheelScreen.fromPayload(body)));
             return false;
         });
     }
 
     static void sendTrigger(Minecraft mc, int value) {
         if (mc.getConnection() != null) mc.getConnection().sendCommand("trigger svm_rp.cast set " + value);
+    }
+
+    /**
+     * Opens a screen. Minecraft 26.x renamed the old Minecraft.setScreen(Screen), so look the method up by shape
+     * (one Screen parameter, returns nothing) instead of by a name that may change again.
+     */
+    static void openScreen(Minecraft mc, Screen screen) {
+        String[] preferred = {"setScreenAndShow", "setScreen"};
+        for (String name : preferred) {
+            if (invokeScreenMethod(mc, screen, name)) return;
+        }
+        invokeScreenMethod(mc, screen, null);
+    }
+
+    private static boolean invokeScreenMethod(Minecraft mc, Screen screen, String name) {
+        for (Method m : Minecraft.class.getDeclaredMethods()) {
+            if (name != null && !m.getName().equals(name)) continue;
+            if (m.getParameterCount() != 1 || m.getReturnType() != void.class) continue;
+            if (!m.getParameterTypes()[0].isAssignableFrom(screen.getClass())) continue;
+            if (!Screen.class.isAssignableFrom(m.getParameterTypes()[0])) continue;
+            try {
+                m.setAccessible(true);
+                m.invoke(mc, screen);
+                return true;
+            } catch (Exception ignored) { }
+        }
+        return false;
     }
 }
