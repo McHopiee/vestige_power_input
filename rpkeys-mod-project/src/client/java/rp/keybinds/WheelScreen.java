@@ -59,9 +59,9 @@ public class WheelScreen extends Screen {
     protected void init() {
         cx = this.width / 2;
         cy = this.height / 2;
-        rOuter = Math.max(60, Math.min(112, Math.min(this.width, this.height) / 2 - 10));
-        rInner = (int) (rOuter * 0.55);
-        rCenter = rInner - 4;
+        rOuter = Math.max(50, Math.min(76, (int) (Math.min(this.width, this.height) * 0.28)));
+        rInner = (int) (rOuter * 0.48);
+        rCenter = rInner - 3;
 
         pages = Math.max(1, (entries.size() + PER_PAGE - 1) / PER_PAGE);
         if (page >= pages) page = 0;
@@ -127,16 +127,18 @@ public class WheelScreen extends Screen {
         // Slice labels: only unlocked spells show their name.
         double sec = 2 * Math.PI / n;
         double rm = (rInner + rOuter) / 2.0;
+        int labelW = (int) Math.max(30, Math.min(70, 2 * rm * Math.sin(Math.PI / Math.max(2, n)) * 0.9));
         for (int i = 0; i < n; i++) {
             Entry e = slot(i);
             if (e == null || !e.unlocked()) continue;
             double a = -Math.PI / 2 + i * sec;
-            drawCentered(g, e.name(), cx + (int) Math.round(Math.cos(a) * rm), cy + (int) Math.round(Math.sin(a) * rm));
+            drawFit(g, e.name(), cx + (int) Math.round(Math.cos(a) * rm), cy + (int) Math.round(Math.sin(a) * rm), labelW);
         }
 
         // Centre disc: power name (and page number when there are several pages).
-        drawCentered(g, power, cx, pages > 1 ? cy - 6 : cy);
-        if (pages > 1) drawCentered(g, (page + 1) + " / " + pages, cx, cy + 8);
+        int centreW = Math.max(30, rCenter * 2 - 8);
+        drawFit(g, power, cx, pages > 1 ? cy - 6 : cy, centreW);
+        if (pages > 1) drawFit(g, (page + 1) + " / " + pages, cx, cy + 9, centreW);
     }
 
     private Entry slot(int i) {
@@ -144,24 +146,43 @@ public class WheelScreen extends Screen {
         return (k >= 0 && k < entries.size()) ? entries.get(k) : null;
     }
 
-    /** Draws text centred on (x, y), wrapping long names onto two lines. */
-    private void drawCentered(GuiGraphicsExtractor g, String text, int x, int y) {
-        String[] lines = wrap(text);
+    /** Draws text centred on (x, y): wraps onto up to three lines and shrinks to fit maxW. */
+    private void drawFit(GuiGraphicsExtractor g, String text, int x, int y, int maxW) {
+        List<String> lines = wrap(text, maxW);
+        int widest = 1;
+        for (String l : lines) widest = Math.max(widest, this.font.width(l));
+        float scale = widest > maxW ? Math.max(0.5f, maxW / (float) widest) : 1f;
         int lh = this.font.lineHeight;
-        int top = y - (lines.length * lh) / 2;
-        for (int i = 0; i < lines.length; i++) {
-            int w = this.font.width(lines[i]);
-            g.text(this.font, lines[i], x - w / 2, top + i * lh, 0xFFFFFFFF, true);
+        float top = y - (lines.size() * lh * scale) / 2f;
+        for (int i = 0; i < lines.size(); i++) {
+            String l = lines.get(i);
+            int w = this.font.width(l);
+            float ly = top + i * lh * scale;
+            if (Gfx.begin(g, x, ly, scale)) {
+                g.text(this.font, l, -w / 2, 0, 0xFFFFFFFF, true);
+                Gfx.end(g);
+            } else {
+                g.text(this.font, l, x - w / 2, Math.round(ly), 0xFFFFFFFF, true);
+            }
         }
     }
 
-    private String[] wrap(String text) {
-        if (this.font.width(text) <= 62 || text.indexOf(' ') < 0) return new String[] {text};
-        int mid = text.length() / 2, best = -1;
-        for (int i = 0; i < text.length(); i++) {
-            if (text.charAt(i) == ' ' && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+    private List<String> wrap(String text, int maxW) {
+        List<String> out = new ArrayList<>();
+        String cur = "";
+        for (String word : text.split(" ")) {
+            if (word.isEmpty()) continue;
+            String t = cur.isEmpty() ? word : cur + " " + word;
+            if (cur.isEmpty() || this.font.width(t) <= maxW) cur = t;
+            else { out.add(cur); cur = word; }
         }
-        return new String[] {text.substring(0, best), text.substring(best + 1)};
+        if (!cur.isEmpty()) out.add(cur);
+        while (out.size() > 3) {                     // merge overflow into the last line
+            String last = out.remove(out.size() - 1);
+            out.set(out.size() - 1, out.get(out.size() - 1) + " " + last);
+        }
+        if (out.isEmpty()) out.add(text);
+        return out;
     }
 
     @Override
