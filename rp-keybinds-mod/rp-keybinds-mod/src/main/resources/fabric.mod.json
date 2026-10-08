@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "rpkeys",
+  "version": "1.0.0",
+  "name": "RP Ability Keybinds",
+  "description": "Client-only keybinds for the SVM Powers roleplay layer.",
+  "environment": "client",
+  "entrypoints": { "client": ["rp.keybinds.RpKeybindsClient"] },
+  "depends": { "fabricloader": "*", "fabric-api": "*" }
+}
