@@ -23,6 +23,7 @@ public class RpKeybindsClient implements ClientModInitializer {
     private static final int SLOTS = 9;
     static final String PREFIX = "RPW|";
     static final String MANA_PREFIX = "RPM|";
+    static final String COOLDOWN_PREFIX = "RPC|";
     static final String VESSEL_PREFIX = "RPV|";
     private final KeyMapping[] slotKeys = new KeyMapping[SLOTS];
     private KeyMapping wheelKey;
@@ -82,6 +83,12 @@ public class RpKeybindsClient implements ClientModInitializer {
             }
         });
 
+        // "On cooldown" notice with a live countdown.
+        HudElementRegistry.attachElementBefore(
+            VanillaHudElements.CHAT,
+            Identifier.fromNamespaceAndPath("rpkeys", "cooldown"),
+            CooldownHud::extract);
+
         // On-screen mana bar next to the hotbar.
         HudElementRegistry.attachElementBefore(
             VanillaHudElements.CHAT,
@@ -99,6 +106,11 @@ public class RpKeybindsClient implements ClientModInitializer {
             String s = message.getString();
             // Quiet the vanilla "You cannot trigger this objective yet" line if two key signals ever land in one tick.
             if (s.contains("cannot trigger this objective")) return false;
+            if (s.startsWith(COOLDOWN_PREFIX)) {
+                String cb = s.substring(COOLDOWN_PREFIX.length());
+                Minecraft.getInstance().execute(() -> CooldownHud.handle(cb));
+                return false;
+            }
             if (s.startsWith(MANA_PREFIX)) {
                 String mb = s.substring(MANA_PREFIX.length());
                 Minecraft.getInstance().execute(() -> ManaHud.handle(mb));
