@@ -2,6 +2,8 @@ package rp.keybinds;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
@@ -36,22 +38,22 @@ public class WheelScreen extends Screen {
         this.entries = entries;
     }
 
-    /** Payload looks like: Power|1:Name:1;2:Name:0;... */
+    /** Payload looks like: Power|1:Name:1;2:Name:0;...  (parsed leniently: stray quotes/separators are ignored) */
     static WheelScreen fromPayload(String payload) {
-        String[] top = payload.split("\\|", 2);
-        String power = top[0];
+        int bar = payload.indexOf('|');
+        String power = (bar < 0 ? payload : payload.substring(0, bar)).replace("\"", "").trim();
+        String rest = bar < 0 ? "" : payload.substring(bar + 1);
         List<Entry> list = new ArrayList<>();
-        if (top.length > 1) {
-            for (String part : top[1].split(";")) {
-                String[] f = part.split(":");
-                if (f.length < 3) continue;
-                try {
-                    list.add(new Entry(Integer.parseInt(f[0].trim()), f[1], f[2].trim().equals("1")));
-                } catch (NumberFormatException ignored) { }
-            }
+        Matcher m = ENTRY.matcher(rest);
+        while (m.find()) {
+            try {
+                list.add(new Entry(Integer.parseInt(m.group(1)), m.group(2).trim(), m.group(3).equals("1")));
+            } catch (NumberFormatException ignored) { }
         }
         return new WheelScreen(power, list);
     }
+
+    private static final Pattern ENTRY = Pattern.compile("(\\d+):([^:;|]+):([01])");
 
     @Override
     protected void init() {
@@ -102,7 +104,7 @@ public class WheelScreen extends Screen {
         rel = ((rel % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
         int idx = Math.min(n - 1, (int) (rel / sec));
         double within = rel - idx * sec;
-        if (Math.min(within, sec - within) * r < 1.5) return NONE; // gap between slices
+        if (Math.min(within, sec - within) * r < 2.0) return NONE; // gap between slices
         return idx;
     }
 
@@ -114,9 +116,9 @@ public class WheelScreen extends Screen {
         for (int i = 0; i < n; i++) {
             Entry e = slot(i);
             int color;
-            if (e == null || !e.unlocked()) color = 0xA0161616;
+            if (e == null || !e.unlocked()) color = 0x90101010;
             else if (hover == i) color = 0xFF1E78FF;
-            else color = 0xD02A2A2A;
+            else color = 0xE0404040;
             for (int[] r : runs.get(i)) g.fill(cx + r[1], cy + r[0], cx + r[2], cy + r[0] + 1, color);
         }
         int centerColor = (hover == CENTER && pages > 1) ? 0xFF1E78FF : 0xD0161616;

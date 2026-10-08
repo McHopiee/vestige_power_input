@@ -5,6 +5,8 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -20,6 +22,7 @@ import net.minecraft.resources.Identifier;
 public class RpKeybindsClient implements ClientModInitializer {
     private static final int SLOTS = 9;
     static final String PREFIX = "RPW|";
+    static final String VESSEL_PREFIX = "RPV|";
     private final KeyMapping[] slotKeys = new KeyMapping[SLOTS];
     private KeyMapping wheelKey;
 
@@ -41,9 +44,20 @@ public class RpKeybindsClient implements ClientModInitializer {
             }
         });
 
+        // On-screen vessel intro (small line, then big line below it, then fade).
+        HudElementRegistry.attachElementBefore(
+            VanillaHudElements.CHAT,
+            Identifier.fromNamespaceAndPath("rpkeys", "vessel"),
+            VesselOverlay::extract);
+
         // Swallow the datapack's hidden spell-list message and open the wheel instead.
         ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
             String s = message.getString();
+            if (s.startsWith(VESSEL_PREFIX)) {
+                String vb = s.substring(VESSEL_PREFIX.length());
+                Minecraft.getInstance().execute(() -> VesselOverlay.handle(vb));
+                return false;
+            }
             if (!s.startsWith(PREFIX)) return true;
             Minecraft mc = Minecraft.getInstance();
             String body = s.substring(PREFIX.length());
